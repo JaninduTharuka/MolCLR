@@ -1,4 +1,4 @@
-batch_size: 24                  # batch size                                                      # 32
+batch_size: 32                  # batch size                                                      # 32
 epochs: 100                     # total number of epochs                                          # 100
 eval_every_n_epochs: 1          # validation frequency                                            # 1
 fine_tune_from: pretrained_gin  # sub directory of pre-trained model in ./ckpt                    # pretrained_gin
@@ -7,6 +7,7 @@ fp16_precision: False           # float precision 16 (i.e. True/False)          
 init_lr: 0.0005                 # initial learning rate for the prediction head                   # 0.0005
 init_base_lr: 0.0001            # initial learning rate for the base GNN encoder                  # 0.0001
 weight_decay: 1e-6              # weight decay of Adam                                            # 1e-6
+base_weight_decay: 1e-8
 gpu: cuda:0                     # training GPU                                                    # cuda:0
 task_name: BBBP                 # name of fine-tuning benchmark, inlcuding                        # BBBP
                                 # classifications: BBBP/BACE/ClinTox/Tox21/HIV/SIDER/MUV

@@ -129,8 +129,8 @@ class FineTune(object):
         base_params = list(map(lambda x: x[1],list(filter(lambda kv: kv[0] not in layer_list, model.named_parameters()))))
 
         optimizer = torch.optim.Adam(
-            [{'params': base_params, 'lr': self.config['init_base_lr']}, {'params': params}],
-            self.config['init_lr'], weight_decay=eval(self.config['weight_decay'])
+            [{'params': base_params, 'lr': self.config['init_base_lr'], 'weight_decay': eval(self.config['base_weight_decay'])}, 
+             {'params': params, 'lr': self.config['init_lr'], 'weight_decay': eval(self.config['weight_decay'])}],
         )
 
         if apex_support and self.config['fp16_precision']:
