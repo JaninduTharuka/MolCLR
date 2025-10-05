@@ -128,10 +128,22 @@ class FineTune(object):
         params = list(map(lambda x: x[1],list(filter(lambda kv: kv[0] in layer_list, model.named_parameters()))))
         base_params = list(map(lambda x: x[1],list(filter(lambda kv: kv[0] not in layer_list, model.named_parameters()))))
 
-        optimizer = torch.optim.Adam(
-            [{'params': base_params, 'lr': self.config['init_base_lr'], 'weight_decay': eval(self.config['base_weight_decay'])}, 
-             {'params': params, 'lr': self.config['init_lr'], 'weight_decay': eval(self.config['weight_decay'])}],
+        optimizer = torch.optim.AdamW(
+            [
+                {
+                    "params": base_params,
+                    "lr": self.config["init_base_lr"],
+                    "weight_decay": float(self.config["base_weight_decay"])
+                },
+                {
+                    "params": params,
+                    "lr": self.config["init_lr"],
+                    "weight_decay": float(self.config["weight_decay"])
+                },
+            ]
         )
+        
+        scheduler = CosineAnnealingLR(optimizer, T_max=self.config['epochs'], eta_min=1e-6)
 
         if apex_support and self.config['fp16_precision']:
             model, optimizer = amp.initialize(
@@ -169,6 +181,8 @@ class FineTune(object):
                 optimizer.step()
                 n_iter += 1
 
+            scheduler.step()
+            
             # validate the model if requested
             if epoch_counter % self.config['eval_every_n_epochs'] == 0:
                 if self.config['dataset']['task'] == 'classification': 
