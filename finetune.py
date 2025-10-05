@@ -15,6 +15,8 @@ from sklearn.metrics import roc_auc_score, mean_squared_error, mean_absolute_err
 
 from dataset.dataset_test import MolTestDatasetWrapper
 
+from torch.optim.lr_scheduler import CosineAnnealingWarmRestarts
+
 
 apex_support = False
 try:
@@ -127,23 +129,36 @@ class FineTune(object):
 
         params = list(map(lambda x: x[1],list(filter(lambda kv: kv[0] in layer_list, model.named_parameters()))))
         base_params = list(map(lambda x: x[1],list(filter(lambda kv: kv[0] not in layer_list, model.named_parameters()))))
-
-        optimizer = torch.optim.AdamW(
-            [
-                {
-                    "params": base_params,
-                    "lr": self.config["init_base_lr"],
-                    "weight_decay": float(self.config["base_weight_decay"])
-                },
-                {
-                    "params": params,
-                    "lr": self.config["init_lr"],
-                    "weight_decay": float(self.config["weight_decay"])
-                },
-            ]
-        )
         
-        scheduler = CosineAnnealingLR(optimizer, T_max=self.config['epochs'], eta_min=1e-6)
+        if self.config['optimizer'] == 'adam':
+            optimizer = torch.optim.Adam(
+                [{'params': base_params, 'lr': self.config['init_base_lr']}, {'params': params}],
+                self.config['init_lr'], weight_decay=eval(self.config['weight_decay'])
+            )
+        elif self.config['optimizer'] == 'adamw':
+            optimizer = torch.optim.AdamW(
+                [
+                    {
+                        "params": base_params,
+                        "lr": self.config["init_base_lr"],
+                        "weight_decay": float(self.config["base_weight_decay"])
+                    },
+                    {
+                        "params": params,
+                        "lr": self.config["init_lr"],
+                        "weight_decay": float(self.config["weight_decay"])
+                    },
+                ]
+            )
+        
+        # scheduler = CosineAnnealingLR(optimizer, T_max=self.config['epochs'], eta_min=1e-6)
+        
+        # scheduler = CosineAnnealingWarmRestarts(optimizer, T_0=10, T_mult=2)
+        
+        if self.config['scheduler'] == 'CosineAnnealingLR':
+            scheduler = CosineAnnealingLR(optimizer, T_max=self.config['epochs'], eta_min=1e-6)
+        elif self.config['scheduler'] == 'CosineAnnealingWarmRestarts':
+            scheduler = CosineAnnealingWarmRestarts(optimizer, T_0=10, T_mult=2)
 
         if apex_support and self.config['fp16_precision']:
             model, optimizer = amp.initialize(
@@ -181,7 +196,8 @@ class FineTune(object):
                 optimizer.step()
                 n_iter += 1
 
-            scheduler.step()
+            if self.config['scheduler'] != 'None':
+                scheduler.step()
             
             # validate the model if requested
             if epoch_counter % self.config['eval_every_n_epochs'] == 0:
