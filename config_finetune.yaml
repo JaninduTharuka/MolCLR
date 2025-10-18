@@ -29,4 +29,8 @@ dataset:
 
 base_weight_decay: 1e-6
 optimizer: adamw                # adam/adamw
-scheduler: CosineAnnealingLR    # CosineAnnealingLR/CosineAnnealingWarmRestarts/None
+scheduler: None                 # CosineAnnealingLR/CosineAnnealingWarmRestarts/None
+early_stopping:
+  enable: False
+  patience: 10
+  min_delta: 0.000001

@@ -132,8 +132,12 @@ class FineTune(object):
         
         if self.config['optimizer'] == 'adam':
             optimizer = torch.optim.Adam(
-                [{'params': base_params, 'lr': self.config['init_base_lr']}, {'params': params}],
-                self.config['init_lr'], weight_decay=eval(self.config['weight_decay'])
+                [
+                    {'params': base_params, 'lr': self.config['init_base_lr'], 
+                    'weight_decay': eval(self.config['base_weight_decay'])},  # use base_weight_decay here
+                    {'params': params, 'lr': self.config['init_lr'], 
+                    'weight_decay': eval(self.config['weight_decay'])}       # regular weight_decay for head
+                ]
             )
         elif self.config['optimizer'] == 'adamw':
             optimizer = torch.optim.AdamW(
@@ -151,14 +155,17 @@ class FineTune(object):
                 ]
             )
         
-        # scheduler = CosineAnnealingLR(optimizer, T_max=self.config['epochs'], eta_min=1e-6)
-        
-        # scheduler = CosineAnnealingWarmRestarts(optimizer, T_0=10, T_mult=2)
-        
         if self.config['scheduler'] == 'CosineAnnealingLR':
             scheduler = CosineAnnealingLR(optimizer, T_max=self.config['epochs'], eta_min=1e-6)
         elif self.config['scheduler'] == 'CosineAnnealingWarmRestarts':
             scheduler = CosineAnnealingWarmRestarts(optimizer, T_0=10, T_mult=2)
+        
+        # Early stopping setup
+        use_early_stopping = self.config.get("early_stopping", {}).get("enable", False)
+        patience = self.config.get("early_stopping", {}).get("patience", 10)
+        min_delta = self.config.get("early_stopping", {}).get("min_delta", 1e-4)
+
+        no_improve_epochs = 0
 
         if apex_support and self.config['fp16_precision']:
             model, optimizer = amp.initialize(
@@ -199,23 +206,42 @@ class FineTune(object):
             if self.config['scheduler'] != 'None':
                 scheduler.step()
             
-            # validate the model if requested
+            # --- Validation & early stopping ---
             if epoch_counter % self.config['eval_every_n_epochs'] == 0:
                 if self.config['dataset']['task'] == 'classification': 
                     valid_loss, valid_cls = self._validate(model, valid_loader)
-                    if valid_cls > best_valid_cls:
-                        # save the model weights
+                    self.writer.add_scalar('validation_loss', valid_loss, global_step=valid_n_iter)
+
+                    improved = valid_cls > best_valid_cls + min_delta
+                    if improved:
                         best_valid_cls = valid_cls
                         torch.save(model.state_dict(), os.path.join(model_checkpoints_folder, 'model.pth'))
+                        no_improve_epochs = 0
+                        print(f"Validation improved (ROC-AUC = {valid_cls:.4f}) → reset patience counter (epoch {epoch_counter}).")
+                    else:
+                        no_improve_epochs += 1
+                        print(f"No improvement for {no_improve_epochs} epoch(s). Best ROC-AUC = {best_valid_cls:.4f}")
+
                 elif self.config['dataset']['task'] == 'regression': 
                     valid_loss, valid_rgr = self._validate(model, valid_loader)
-                    if valid_rgr < best_valid_rgr:
-                        # save the model weights
+                    self.writer.add_scalar('validation_loss', valid_loss, global_step=valid_n_iter)
+
+                    improved = valid_rgr < best_valid_rgr - min_delta
+                    if improved:
+                        change = best_valid_rgr - valid_rgr
                         best_valid_rgr = valid_rgr
                         torch.save(model.state_dict(), os.path.join(model_checkpoints_folder, 'model.pth'))
+                        no_improve_epochs = 0
+                        print(f"Validation improved by {change:.4f} → reset patience counter (epoch {epoch_counter}).")
+                    else:
+                        no_improve_epochs += 1
+                        print(f"No improvement for {no_improve_epochs} epoch(s). Best val_loss = {best_valid_rgr:.4f}")
 
-                self.writer.add_scalar('validation_loss', valid_loss, global_step=valid_n_iter)
                 valid_n_iter += 1
+
+                if use_early_stopping and no_improve_epochs >= patience:
+                    print(f"⏹ Early stopping triggered at epoch {epoch_counter}. Best model saved earlier.")
+                    break
         
         self._test(model, test_loader)
 
