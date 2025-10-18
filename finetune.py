@@ -134,9 +134,9 @@ class FineTune(object):
             optimizer = torch.optim.Adam(
                 [
                     {'params': base_params, 'lr': self.config['init_base_lr'], 
-                    'weight_decay': eval(self.config['base_weight_decay'])},  # use base_weight_decay here
+                    'weight_decay': float(self.config['base_weight_decay'])},  # use base_weight_decay here
                     {'params': params, 'lr': self.config['init_lr'], 
-                    'weight_decay': eval(self.config['weight_decay'])}       # regular weight_decay for head
+                    'weight_decay': float(self.config['weight_decay'])}       # regular weight_decay for head
                 ]
             )
         elif self.config['optimizer'] == 'adamw':
