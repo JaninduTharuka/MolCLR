@@ -120,10 +120,20 @@ class FineTune(object):
             from models.gcn_finetune import GCN
             model = GCN(self.config['dataset']['task'], **self.config["model"]).to(self.device)
             model = self._load_pre_trained_weights(model)
+        
+        elif self.config['model_type'] == 'both':
+            from models.ginet_finetune import GINet
+            from models.gcn_finetune import GCN
+            from models.ensemble_model import EnsembleModel
+            model_gin = GINet(self.config['dataset']['task'], **self.config["model"]).to(self.device)
+            model_gin = self._load_pre_trained_weights_ensemble(model_gin, 'pretrained_gin')
+            model_gcn = GCN(self.config['dataset']['task'], **self.config["model"]).to(self.device)
+            model_gcn = self._load_pre_trained_weights_ensemble(model_gcn, 'pretrained_gcn')
+            model = EnsembleModel(model_gin, model_gcn, self.config).to(self.device)
 
         layer_list = []
         for name, param in model.named_parameters():
-            if 'pred_head' in name:
+            if 'pred_head' in name or 'ensemble_pred_head' in name:
                 print(name, param.requires_grad)
                 layer_list.append(name)
 
@@ -254,6 +264,18 @@ class FineTune(object):
             print("Loaded pre-trained model with success.")
         except FileNotFoundError:
             print("Pre-trained weights not found. Training from scratch.")
+
+        return model
+    
+    def _load_pre_trained_weights_ensemble(self, model, model_path_name):
+        """Helper to load weights for ensemble models."""
+        try:
+            checkpoints_folder = os.path.join('./ckpt', model_path_name, 'checkpoints')
+            state_dict = torch.load(os.path.join(checkpoints_folder, 'model.pth'), map_location=self.device)
+            model.load_my_state_dict(state_dict)
+            print(f"Loaded {model_path_name} with success.")
+        except FileNotFoundError:
+            print(f"Pre-trained weights not found for {model_path_name}. Training from scratch.")
 
         return model
 
