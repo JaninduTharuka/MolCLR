@@ -16,6 +16,8 @@ from torch_geometric.utils import add_self_loops, degree, softmax
 from torch_geometric.nn import global_add_pool, global_mean_pool, global_max_pool
 from torch_geometric.utils.num_nodes import maybe_num_nodes
 
+from torch_geometric.utils import to_dense_batch
+
 
 num_atom_type = 119 # including the extra mask tokens
 num_chirality_tag = 3
@@ -90,9 +92,66 @@ class GCNConv(MessagePassing):
     def message_and_aggregate(self, adj_t, x):
         return torch_sparse.matmul(adj_t, x, reduce=self.aggr)
 
+class GraphTransformerPool(nn.Module):
+    """
+    A Transformer-based readout layer, modified to act as a pooling layer.
+    
+    It uses a [CLS] token, applies a Transformer Encoder, and then 
+    returns the [CLS] token's embedding as the graph representation.
+    """
+    # CHANGED: Removed output_dim from __init__
+    def __init__(self, emb_dim, n_head=8, n_layer=4, dropout=0.1):
+        super().__init__()
+        self.emb_dim = emb_dim
+        
+        # A learnable [CLS] token
+        self.cls_token = nn.Parameter(torch.zeros(1, 1, emb_dim))
+        
+        # The Transformer Encoder
+        transformer_layer = nn.TransformerEncoderLayer(
+            d_model=emb_dim, 
+            nhead=n_head,
+            dim_feedforward=emb_dim * 4,
+            dropout=dropout,
+            activation='relu'
+        )
+        self.transformer_encoder = nn.TransformerEncoder(
+            transformer_layer, 
+            num_layers=n_layer
+        )
+        
+        # --- CHANGED: REMOVED self.ffn ---
+        
+    def forward(self, h_nodes, data_batch):
+        # h_nodes shape: [TotalNodes, emb_dim]
+        # data_batch shape: [TotalNodes]
+        
+        dense_h, mask = to_dense_batch(h_nodes, data_batch)
+        B, _L, _D = dense_h.shape
+        cls_tokens = self.cls_token.expand(B, -1, -1)
+        dense_h_with_cls = torch.cat([cls_tokens, dense_h], dim=1)
+        
+        cls_mask = torch.zeros(B, 1, dtype=torch.bool, device=h_nodes.device)
+        inverted_node_mask = ~mask
+        final_mask = torch.cat([cls_mask, inverted_node_mask], dim=1)
+
+        dense_h_with_cls = dense_h_with_cls.permute(1, 0, 2)
+        
+        transformer_out = self.transformer_encoder(
+            dense_h_with_cls, 
+            src_key_padding_mask=final_mask
+        )
+        
+        transformer_out = transformer_out.permute(1, 0, 2)
+
+        # h_global shape: [BatchSize, emb_dim]
+        h_global = transformer_out[:, 0]  # Select the first token
+        
+        # --- CHANGED: Return h_global directly ---
+        return h_global
 
 class GCN(nn.Module):
-    def __init__(self, task='classification', num_layer=5, emb_dim=300, feat_dim=256, drop_ratio=0, pool='mean'):
+    def __init__(self, task='classification', num_layer=5, emb_dim=300, feat_dim=256, drop_ratio=0, pool='mean', trans_n_layer=1, trans_n_head=12):
         super(GCN, self).__init__()
         self.num_layer = num_layer
         self.emb_dim = emb_dim
@@ -125,6 +184,13 @@ class GCN(nn.Module):
             self.pool = global_add_pool
         elif pool == 'max':
             self.pool = global_max_pool
+        elif pool == 'transformer':
+            self.pool = GraphTransformerPool(
+                emb_dim=emb_dim, 
+                n_head=trans_n_head, 
+                n_layer=trans_n_layer, 
+                dropout=drop_ratio
+            )
         else:
             raise ValueError('Not defined pooling!')
         

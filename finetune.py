@@ -17,6 +17,8 @@ from dataset.dataset_test import MolTestDatasetWrapper
 
 from torch.optim.lr_scheduler import CosineAnnealingWarmRestarts
 
+from sklearn.metrics import r2_score, f1_score
+
 
 apex_support = False
 try:
@@ -237,7 +239,7 @@ class FineTune(object):
                     self.writer.add_scalar('validation_loss', valid_loss, global_step=valid_n_iter)
 
                     improved = valid_rgr < best_valid_rgr - min_delta
-                    if improved:
+                    if improved and use_early_stopping:
                         change = best_valid_rgr - valid_rgr
                         best_valid_rgr = valid_rgr
                         torch.save(model.state_dict(), os.path.join(model_checkpoints_folder, 'model.pth'))
@@ -375,18 +377,20 @@ class FineTune(object):
         if self.config['dataset']['task'] == 'regression':
             predictions = np.array(predictions)
             labels = np.array(labels)
+            self.r2 = r2_score(labels, predictions)
             if self.config['task_name'] in ['qm7', 'qm8', 'qm9']:
                 self.mae = mean_absolute_error(labels, predictions)
-                print('Test loss:', test_loss, 'Test MAE:', self.mae)
+                print('Test loss:', test_loss, 'Test MAE:', self.mae, 'R2:', self.r2)
             else:
                 self.rmse = mean_squared_error(labels, predictions, squared=False)
-                print('Test loss:', test_loss, 'Test RMSE:', self.rmse)
+                print('Test loss:', test_loss, 'Test RMSE:', self.rmse, 'R2:', self.r2)
 
         elif self.config['dataset']['task'] == 'classification': 
             predictions = np.array(predictions)
             labels = np.array(labels)
             self.roc_auc = roc_auc_score(labels, predictions[:,1])
-            print('Test loss:', test_loss, 'Test ROC AUC:', self.roc_auc)
+            self.f1 = f1_score(labels, np.round(predictions[:,1]))
+            print('Test loss:', test_loss, 'Test ROC AUC:', self.roc_auc, 'F1 Score:', self.f1)
 
 
 def main(config):
